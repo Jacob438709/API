@@ -2,6 +2,7 @@ var mysql = require('mysql');
 var bcrypt = require('bcrypt');
 var jwt = require('jsonwebtoken');
 
+//Nyckel för Tokens
 var SECRET_KEY = "hemligt";
 
 var con = mysql.createConnection({
@@ -23,11 +24,11 @@ var http = require('http').Server(app);
 var port = 5000;
 
 app.use(express.json());
-
+//Kollar om Token är giltig
 function authenticateToken(req, res, next) {
-
+  // Hämtar Authorization-headern
   var authHeader = req.headers['authorization'];
-
+  //Hämtar Token
   var token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
@@ -35,7 +36,7 @@ function authenticateToken(req, res, next) {
       message: "Token required"
     });
   }
-
+  //Verifierar token
   jwt.verify(token, SECRET_KEY, function(err, user) {
 
     if (err) {
@@ -52,9 +53,6 @@ function authenticateToken(req, res, next) {
 
 }
 
-/*
-  Dokumentation
-*/
 app.get('/', function(req, res) {
   res.send(`
     <html>
@@ -137,9 +135,6 @@ Bearer {Token}
   `);
 });
 
-/*
-  GET alla users
-*/
 app.get('/users', authenticateToken, function(req, res) {
 
   var sql = "SELECT id, username, name, age FROM users";
@@ -156,9 +151,6 @@ app.get('/users', authenticateToken, function(req, res) {
 
 });
 
-/*
-  GET user via ID
-*/
 app.get('/users/:id', authenticateToken, function(req, res) {
 
   var id = req.params.id;
@@ -187,23 +179,20 @@ app.get('/users/:id', authenticateToken, function(req, res) {
 
 });
 
-/*
-  POST skapa ny user
-*/
 app.post('/users', async function(req, res) {
 
   var username = req.body.username;
   var password = req.body.password;
   var name = req.body.name;
   var age = req.body.age;
-
+  //Kontrollerar att alla fält är ifyllda
   if (!username || !password || !name || !age) {
     return res.status(400).json({
       message: "All fields are required"
     });
   }
 
-  // Hasha lösenord
+  // Hashar lösenordet
   var hashedPassword = await bcrypt.hash(password, 10);
 
   var sql = `
@@ -214,7 +203,7 @@ app.post('/users', async function(req, res) {
   con.query(sql, [username, hashedPassword, name, age], function(err, result) {
 
     
-
+    //Kontrollerar att det inte redan finns en annan user med samma username
     if (err) {
       if (err.code === 'ER_DUP_ENTRY') {
         return res.status(400).json({
@@ -268,7 +257,7 @@ app.put('/users/:id', authenticateToken, function(req, res) {
         message: err.message
       });
     }
-
+    //Kontrollerar ifall det finns en user med det id:t
     if (result.affectedRows === 0) {
       return res.status(404).json({
         message: "User not found"
@@ -333,7 +322,7 @@ app.post('/login', function(req, res) {
       });
     }
 
-    // Returnera INTE password
+    // Skapar en token som håller i 1 timme
     var token = jwt.sign(
     {
       id: user.id,
