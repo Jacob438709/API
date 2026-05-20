@@ -1,4 +1,5 @@
 var mysql = require('mysql');
+var bcrypt = require('bcrypt');
 
 var con = mysql.createConnection({
   host: "localhost",
@@ -27,24 +28,44 @@ app.get('/', function(req, res) {
   res.send(`
     <html>
       <body>
-        <h1>Dokumentation av API</h1>
+
+        <h1>Dokumentation av det här APIet</h1>
 
         <h2>Routes</h2>
 
-        <p>GET /users - Hämtar alla users</p>
+        <ul>
 
-        <p>GET /users/:id - Hämtar en user via id</p>
+          <li>
+            <b>GET /users</b> - returnerar alla användare.
+          </li>
 
-        <p>POST /users - Skapar en ny user</p>
+          <li>
+            <b>GET /users/:id</b> - returnerar en användare med angivet id.
+          </li>
 
-        <h3>Exempel på POST JSON:</h3>
+          <li>
+            <b>POST /users</b> - skapar en ny användare.
+            Accepterar JSON på formatet:
+          </li>
 
-        <pre>
+          <li>
+            <b>PUT /users/:id</b> - uppdaterar en användare.
+          </li>
+
+          <li>
+            <b>POST /login</b> - loggar in en användare.
+          </li>
+        </ul>
+
+<pre>
+POST /users
 {
-  "name": "Boaty McBoatface",
-  "age": 25
+  "username": "...",
+  "password": "...",
+  "name": "...",
+  "age": ...
 }
-        </pre>
+</pre>
 
       </body>
     </html>
@@ -56,10 +77,14 @@ app.get('/', function(req, res) {
 */
 app.get('/users', function(req, res) {
 
-  var sql = "SELECT * FROM users";
+  var sql = "SELECT id, username, name, age FROM users";
 
   con.query(sql, function(err, result) {
-    if (err) throw err;
+    if (err) {
+      return res.status(500).json({
+        message: "Database error"
+      });
+    }
 
     res.json(result);
   });
@@ -73,10 +98,17 @@ app.get('/users/:id', function(req, res) {
 
   var id = req.params.id;
 
-  var sql = "SELECT * FROM users WHERE id = ?";
+  var sql = `SELECT id, username, name, age
+  FROM users
+  WHERE id = ?
+`;
 
   con.query(sql, [id], function(err, result) {
-    if (err) throw err;
+    if (err) {
+      return res.status(500).json({
+        message: "Database error"
+      });
+    }
 
     // Om ingen user hittas
     if (result.length === 0) {
@@ -93,21 +125,160 @@ app.get('/users/:id', function(req, res) {
 /*
   POST skapa ny user
 */
-app.post('/users', function(req, res) {
+app.post('/users', async function(req, res) {
 
+  var username = req.body.username;
+  var password = req.body.password;
   var name = req.body.name;
   var age = req.body.age;
 
-  var sql = "INSERT INTO users (name, age) VALUES (?, ?)";
+  if (!username || !password || !name || !age) {
+    return res.status(400).json({
+      message: "All fields are required"
+    });
+  }
 
-  con.query(sql, [name, age], function(err, result) {
-    if (err) throw err;
+  // Hasha lösenord
+  var hashedPassword = await bcrypt.hash(password, 10);
+
+  var sql = `
+    INSERT INTO users (username, password, name, age)
+    VALUES (?, ?, ?, ?)
+  `;
+
+  con.query(sql, [username, hashedPassword, name, age], function(err, result) {
+
+    
+
+    if (err) {
+      if (err.code === 'ER_DUP_ENTRY') {
+        return res.status(400).json({
+          message: "Username already exists"
+        });
+      }
+      return res.status(500).json({
+        message: err.message
+      });
+    }
 
     res.status(201).json({
       id: result.insertId,
+      username: username,
       name: name,
       age: age
     });
+
+  });
+
+});
+
+app.put('/users/:id', function(req, res) {
+
+  var id = req.params.id;
+
+  var username = req.body.username;
+  var name = req.body.name;
+  var age = req.body.age;
+
+  var sql = `
+    UPDATE users
+    SET username = ?, name = ?, age = ?
+    WHERE id = ?
+  `;
+  if (!username || !name || !age) {
+    return res.status(400).json({
+      message: "All fields are required"
+    });
+  }
+  con.query(sql, [username, name, age, id], function(err, result) {
+
+    if (err) {
+      if (err.code === 'ER_DUP_ENTRY') {
+        return res.status(400).json({
+          message: "Username already exists"
+        });
+      }
+
+      return res.status(500).json({
+        message: err.message
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        message: "User not found"
+      });
+    }
+
+    // Hämta uppdaterad användare
+    var sql2 = "SELECT id, username, name, age FROM users WHERE id = ?";
+
+    con.query(sql2, [id], function(err, result2) {
+
+      if (err) {
+        return res.status(500).json({
+          message: "Database error"
+        });
+      }
+
+      res.status(200).json(result2[0]);
+
+    });
+
+  });
+
+});
+
+app.post('/login', function(req, res) {
+
+  var username = req.body.username;
+  var password = req.body.password;
+
+  if (!username || !password) {
+    return res.status(400).json({
+      message: "Username and password required"
+    });
+  }
+
+  var sql = "SELECT * FROM users WHERE username = ?";
+
+  con.query(sql, [username], async function(err, result) {
+
+    if (err) {
+      return res.status(500).json({
+        message: "Database error"
+      });
+    }
+
+    // Ingen användare hittades
+    if (result.length === 0) {
+      return res.status(401).json({
+        message: "Wrong username or password"
+      });
+    }
+
+    var user = result[0];
+
+    // Jämför lösenord med hash
+    var correctPassword = await bcrypt.compare(password, user.password);
+
+    if (!correctPassword) {
+      return res.status(401).json({
+        message: "Wrong username or password"
+      });
+    }
+
+    // Returnera INTE password
+    res.status(200).json({
+      message: "Login successful",
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        age: user.age
+      }
+    });
+
   });
 
 });
