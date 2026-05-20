@@ -1,5 +1,8 @@
 var mysql = require('mysql');
 var bcrypt = require('bcrypt');
+var jwt = require('jsonwebtoken');
+
+var SECRET_KEY = "hemligt";
 
 var con = mysql.createConnection({
   host: "localhost",
@@ -21,6 +24,34 @@ var port = 5000;
 
 app.use(express.json());
 
+function authenticateToken(req, res, next) {
+
+  var authHeader = req.headers['authorization'];
+
+  var token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({
+      message: "Token required"
+    });
+  }
+
+  jwt.verify(token, SECRET_KEY, function(err, user) {
+
+    if (err) {
+      return res.status(403).json({
+        message: "Invalid token"
+      });
+    }
+
+    req.user = user;
+
+    next();
+
+  });
+
+}
+
 /*
   Dokumentation
 */
@@ -36,32 +67,66 @@ app.get('/', function(req, res) {
         <ul>
 
           <li>
-            <b>GET /users</b> - returnerar alla användare.
+            <b>GET /users</b> - Returnerar alla användare. Kräver JWT-token.
           </li>
 
           <li>
-            <b>GET /users/:id</b> - returnerar en användare med angivet id.
+            <b>GET /users/{id}</b> - Returnerar en användare med angivet id. Kräver JWT-token.
           </li>
 
           <li>
-            <b>POST /users</b> - skapar en ny användare.
-            Accepterar JSON på formatet:
+            <b>POST /users</b> - Skapar en ny användare.
+            Accepterar JSON på formatet som står nedan.
           </li>
 
           <li>
-            <b>PUT /users/:id</b> - uppdaterar en användare.
+            <b>PUT /users/{id}</b> - Uppdaterar en användare. Kräver JWT-token.
           </li>
 
           <li>
-            <b>POST /login</b> - loggar in en användare.
+            <b>POST /login</b> - Loggar in en användare.
           </li>
         </ul>
+<h2>Authentication</h2>
 
+<p>
+Följande routes kräver JWT-token:
+</p>
+
+<ul>
+  <li>GET /users</li>
+  <li>GET /users/{id}</li>
+  <li>PUT /users/{id}</li>
+</ul>
+
+<p>
+Token skickas i Authorization-headern i formatet
+Bearer {Token}
+</p>
+
+<h3>POST /users</h3>
 <pre>
-POST /users
 {
   "username": "...",
   "password": "...",
+  "name": "...",
+  "age": ...
+}
+</pre>
+<h3>POST /login</h3>
+
+<pre>
+{
+  "username": "...",
+  "password": "..."
+}
+</pre>
+
+<h3>PUT /users/{id}</h3>
+
+<pre>
+{
+  "username": "...",
   "name": "...",
   "age": ...
 }
@@ -75,7 +140,7 @@ POST /users
 /*
   GET alla users
 */
-app.get('/users', function(req, res) {
+app.get('/users', authenticateToken, function(req, res) {
 
   var sql = "SELECT id, username, name, age FROM users";
 
@@ -94,7 +159,7 @@ app.get('/users', function(req, res) {
 /*
   GET user via ID
 */
-app.get('/users/:id', function(req, res) {
+app.get('/users/:id', authenticateToken, function(req, res) {
 
   var id = req.params.id;
 
@@ -172,7 +237,7 @@ app.post('/users', async function(req, res) {
 
 });
 
-app.put('/users/:id', function(req, res) {
+app.put('/users/:id', authenticateToken, function(req, res) {
 
   var id = req.params.id;
 
@@ -269,15 +334,21 @@ app.post('/login', function(req, res) {
     }
 
     // Returnera INTE password
-    res.status(200).json({
-      message: "Login successful",
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        age: user.age
-      }
-    });
+    var token = jwt.sign(
+    {
+      id: user.id,
+      username: user.username
+    },
+    SECRET_KEY,
+    {
+      expiresIn: '1h'
+    }
+  );
+
+  res.status(200).json({
+    message: "Login successful",
+    token: token
+  });
 
   });
 
